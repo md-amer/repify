@@ -17,8 +17,8 @@ const EXERCISES = {
     name: 'Bicep Curl',
     landmarks: { shoulder: 11, elbow: 13, wrist: 15 }, // Left arm
     landmarksRight: { shoulder: 12, elbow: 14, wrist: 16 },
-    extended: 160,
-    contracted: 50,
+    extended: 140, // Lowered from 160 - easier to trigger
+    contracted: 70, // Raised from 50 - easier to trigger
     instructions: 'Stand sideways to camera. Keep elbow stationary, curl weight up fully.',
   },
   squat: {
@@ -69,6 +69,7 @@ const RepifyApp = () => {
   const [error, setError] = useState('');
   const [mediapipeLoaded, setMediapipeLoaded] = useState(false);
   const [debugInfo, setDebugInfo] = useState('');
+  const [poseDetected, setPoseDetected] = useState(false);
 
   const poseRef = useRef(null);
   const cameraRef = useRef(null);
@@ -215,6 +216,9 @@ const RepifyApp = () => {
 
     // Draw landmarks and connections
     if (results.poseLandmarks) {
+      setPoseDetected(true);
+      console.log('✓ Pose detected! Landmarks:', results.poseLandmarks.length);
+      
       // Draw connections
       window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, {
         color: '#00FF00',
@@ -232,6 +236,11 @@ const RepifyApp = () => {
       if (isTracking) {
         detectRep(results.poseLandmarks);
       }
+    } else {
+      setPoseDetected(false);
+      if (isTracking) {
+        setDebugInfo('⚠️ No pose detected! Step back and face camera');
+      }
     }
   };
 
@@ -240,40 +249,66 @@ const RepifyApp = () => {
     const exercise = EXERCISES[selectedExercise];
     const config = useLeftSide ? exercise.landmarks : exercise.landmarksRight;
 
-    const points = {
-      a: landmarks[Object.values(config)[0]],
-      b: landmarks[Object.values(config)[1]],
-      c: landmarks[Object.values(config)[2]]
-    };
+    console.log('Config:', config);
+    console.log('Landmarks available:', landmarks ? landmarks.length : 0);
 
-    // Check if all points are visible
-    if (!points.a || !points.b || !points.c || 
-        points.a.visibility < 0.5 || points.b.visibility < 0.5 || points.c.visibility < 0.5) {
-      setDebugInfo(`Landmarks not visible enough`);
+    const pointA = landmarks[config.shoulder];
+    const pointB = landmarks[config.elbow];
+    const pointC = landmarks[config.wrist];
+
+    console.log('Point A (shoulder):', pointA);
+    console.log('Point B (elbow):', pointB);
+    console.log('Point C (wrist):', pointC);
+
+    // Check if all points exist
+    if (!pointA || !pointB || !pointC) {
+      setDebugInfo(`❌ Landmarks missing! Shoulder:${!!pointA} Elbow:${!!pointB} Wrist:${!!pointC}`);
+      setCurrentAngle(0);
       return;
     }
 
-    const angle = calculateAngle(points.a, points.b, points.c);
+    const visibilities = `S:${pointA.visibility?.toFixed(2)} E:${pointB.visibility?.toFixed(2)} W:${pointC.visibility?.toFixed(2)}`;
+    
+    if (pointA.visibility < 0.3 || pointB.visibility < 0.3 || pointC.visibility < 0.3) {
+      setDebugInfo(`⚠️ Low visibility! ${visibilities} - Make sure ${useLeftSide ? 'LEFT' : 'RIGHT'} side visible`);
+      setCurrentAngle(0);
+      return;
+    }
+
+    const angle = calculateAngle(pointA, pointB, pointC);
+    console.log('Calculated angle:', angle);
     setCurrentAngle(Math.round(angle));
 
     const { extended, contracted } = exercise;
     let newState = lastStateRef.current;
 
-    setDebugInfo(`Angle: ${Math.round(angle)}° | State: ${lastStateRef.current} | Extended: ${extended}° | Contracted: ${contracted}°`);
+    // Detailed debug info
+    const stateEmoji = lastStateRef.current === 'extended' ? '⬇️' : lastStateRef.current === 'contracted' ? '⬆️' : '⏸️';
+    setDebugInfo(`${stateEmoji} ${Math.round(angle)}° | Need: <${contracted}° UP or >${extended}° DOWN | ${visibilities}`);
 
-    // State machine for rep counting
-    if (angle > extended && lastStateRef.current !== 'extended') {
-      newState = 'extended';
-      setRepState('DOWN');
-      console.log('State: EXTENDED (arm down)');
-    } else if (angle < contracted && lastStateRef.current === 'extended') {
-      newState = 'contracted';
-      setRepState('UP!');
-      setRepCount(prev => prev + 1);
-      playRepSound();
-      console.log('State: CONTRACTED (rep counted!)');
-    } else if (angle > contracted && angle < extended && lastStateRef.current === 'contracted') {
-      newState = 'extended';
+    // State machine for rep counting with more detailed logging
+    if (angle > extended) {
+      if (lastStateRef.current !== 'extended') {
+        newState = 'extended';
+        setRepState('DOWN ⬇️');
+        console.log(`✓ ARM DOWN: ${Math.round(angle)}° > ${extended}°`);
+      }
+    } else if (angle < contracted) {
+      if (lastStateRef.current === 'extended') {
+        newState = 'contracted';
+        setRepState('UP! 🎉');
+        setRepCount(prev => {
+          const newCount = prev + 1;
+          console.log(`🎉 REP COUNTED! #${newCount} - Angle: ${Math.round(angle)}° < ${contracted}°`);
+          return newCount;
+        });
+        playRepSound();
+      } else if (lastStateRef.current === 'waiting') {
+        // Allow first rep from waiting state
+        newState = 'contracted';
+        setRepState('UP! 🎉');
+        console.log(`🎉 FIRST REP from waiting - Angle: ${Math.round(angle)}°`);
+      }
     }
 
     lastStateRef.current = newState;
@@ -410,9 +445,13 @@ const RepifyApp = () => {
                 )}
 
                 {/* Debug Info */}
-                {isTracking && debugInfo && (
-                  <div className="absolute bottom-4 left-4 right-4 bg-black/80 px-4 py-2 rounded-lg text-xs text-gray-300">
-                    {debugInfo}
+                {debugInfo && (
+                  <div className="absolute bottom-4 left-4 right-4 bg-black/90 px-4 py-3 rounded-lg text-sm">
+                    <div className="text-yellow-300 font-mono">{debugInfo}</div>
+                    <div className="text-gray-400 text-xs mt-1">
+                      Pose: {poseDetected ? '✓ Detected' : '✗ Not detected'} | 
+                      MediaPipe: {mediapipeLoaded ? '✓ Loaded' : '✗ Loading'}
+                    </div>
                   </div>
                 )}
               </div>
