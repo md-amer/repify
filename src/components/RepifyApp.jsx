@@ -68,10 +68,10 @@ const RepifyApp = () => {
   const [workoutTime, setWorkoutTime] = useState(0);
   const [error, setError] = useState('');
   const [mediapipeLoaded, setMediapipeLoaded] = useState(false);
+  const [debugInfo, setDebugInfo] = useState('');
 
   const poseRef = useRef(null);
   const cameraRef = useRef(null);
-  const animationRef = useRef(null);
   const startTimeRef = useRef(null);
   const lastStateRef = useRef('waiting');
 
@@ -108,6 +108,7 @@ const RepifyApp = () => {
             drawingScript.onload = () => {
               setMediapipeLoaded(true);
               console.log('MediaPipe loaded successfully');
+              setDebugInfo('MediaPipe loaded ✓');
             };
             
             document.body.appendChild(drawingScript);
@@ -162,11 +163,12 @@ const RepifyApp = () => {
           });
           await videoRef.current.play();
           setCameraReady(true);
+          setDebugInfo('Camera ready ✓');
 
           // Initialize MediaPipe camera
           const camera = new window.Camera(videoRef.current, {
             onFrame: async () => {
-              if (poseRef.current) {
+              if (poseRef.current && videoRef.current) {
                 await poseRef.current.send({ image: videoRef.current });
               }
             },
@@ -205,8 +207,11 @@ const RepifyApp = () => {
     canvas.width = results.image.width;
     canvas.height = results.image.height;
 
-    // Clear canvas
+    // Draw the video frame first
+    ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     // Draw landmarks and connections
     if (results.poseLandmarks) {
@@ -241,7 +246,12 @@ const RepifyApp = () => {
       c: landmarks[Object.values(config)[2]]
     };
 
-    if (!points.a || !points.b || !points.c) return;
+    // Check if all points are visible
+    if (!points.a || !points.b || !points.c || 
+        points.a.visibility < 0.5 || points.b.visibility < 0.5 || points.c.visibility < 0.5) {
+      setDebugInfo(`Landmarks not visible enough`);
+      return;
+    }
 
     const angle = calculateAngle(points.a, points.b, points.c);
     setCurrentAngle(Math.round(angle));
@@ -249,14 +259,21 @@ const RepifyApp = () => {
     const { extended, contracted } = exercise;
     let newState = lastStateRef.current;
 
-    if (angle > extended && lastStateRef.current !== 'down') {
-      newState = 'down';
+    setDebugInfo(`Angle: ${Math.round(angle)}° | State: ${lastStateRef.current} | Extended: ${extended}° | Contracted: ${contracted}°`);
+
+    // State machine for rep counting
+    if (angle > extended && lastStateRef.current !== 'extended') {
+      newState = 'extended';
       setRepState('DOWN');
-    } else if (angle < contracted && lastStateRef.current === 'down') {
-      newState = 'up';
+      console.log('State: EXTENDED (arm down)');
+    } else if (angle < contracted && lastStateRef.current === 'extended') {
+      newState = 'contracted';
       setRepState('UP!');
       setRepCount(prev => prev + 1);
       playRepSound();
+      console.log('State: CONTRACTED (rep counted!)');
+    } else if (angle > contracted && angle < extended && lastStateRef.current === 'contracted') {
+      newState = 'extended';
     }
 
     lastStateRef.current = newState;
@@ -264,21 +281,25 @@ const RepifyApp = () => {
 
   // Play sound on rep completion
   const playRepSound = () => {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    oscillator.frequency.value = 800;
-    oscillator.type = 'sine';
-    
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
-    
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.1);
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800;
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (err) {
+      console.error('Audio error:', err);
+    }
   };
 
   // Start tracking
@@ -290,11 +311,13 @@ const RepifyApp = () => {
     startTimeRef.current = Date.now();
     lastStateRef.current = 'waiting';
     setRepState('Ready!');
+    console.log('Workout started');
   };
 
   // Stop tracking
   const stopTracking = () => {
     setIsTracking(false);
+    console.log('Workout stopped');
   };
 
   // Reset
@@ -349,7 +372,7 @@ const RepifyApp = () => {
               <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
                 <video
                   ref={videoRef}
-                  className="absolute inset-0 w-full h-full object-cover hidden"
+                  className="absolute inset-0 w-full h-full object-cover opacity-0"
                   playsInline
                   muted
                 />
@@ -371,7 +394,7 @@ const RepifyApp = () => {
                 {isTracking && (
                   <div className="absolute top-4 left-4 bg-black/80 px-6 py-3 rounded-lg">
                     <div className={`text-3xl font-bold ${
-                      repState === 'UP!' ? 'text-green-400' : 'text-yellow-400'
+                      repState === 'UP!' ? 'text-green-400 animate-pulse' : 'text-yellow-400'
                     }`}>
                       {repState}
                     </div>
@@ -383,6 +406,13 @@ const RepifyApp = () => {
                   <div className="absolute top-4 right-4 bg-black/80 px-4 py-2 rounded-lg">
                     <div className="text-xs text-gray-300">Angle</div>
                     <div className="text-2xl font-bold text-blue-400">{currentAngle}°</div>
+                  </div>
+                )}
+
+                {/* Debug Info */}
+                {isTracking && debugInfo && (
+                  <div className="absolute bottom-4 left-4 right-4 bg-black/80 px-4 py-2 rounded-lg text-xs text-gray-300">
+                    {debugInfo}
                   </div>
                 )}
               </div>
