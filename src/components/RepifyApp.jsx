@@ -75,6 +75,7 @@ const RepifyApp = () => {
   const cameraRef = useRef(null);
   const startTimeRef = useRef(null);
   const lastStateRef = useRef('waiting');
+  const isTrackingRef = useRef(false);
 
   // Timer effect
   useEffect(() => {
@@ -214,6 +215,9 @@ const RepifyApp = () => {
     ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
     ctx.restore();
 
+    // ALWAYS log when this function is called
+    console.log('onPoseResults called, tracking:', isTracking);
+
     // Draw landmarks and connections
     if (results.poseLandmarks && results.poseLandmarks.length > 0) {
       setPoseDetected(true);
@@ -235,10 +239,12 @@ const RepifyApp = () => {
         });
       }
 
-      // Detect reps if tracking
-      if (isTracking) {
-        console.log('Calling detectRep with', results.poseLandmarks.length, 'landmarks');
+      // Detect reps if tracking - use ref instead of state
+      if (isTrackingRef.current) {
+        console.log('🔥 Calling detectRep with', results.poseLandmarks.length, 'landmarks');
         detectRep(results.poseLandmarks);
+      } else {
+        console.log('⏸️ Not tracking (ref says false)');
       }
     } else {
       setPoseDetected(false);
@@ -345,18 +351,20 @@ const RepifyApp = () => {
   const startTracking = () => {
     if (!cameraReady) return;
     setIsTracking(true);
+    isTrackingRef.current = true;
     setRepCount(0);
     setWorkoutTime(0);
     startTimeRef.current = Date.now();
     lastStateRef.current = 'waiting';
     setRepState('Ready!');
-    console.log('Workout started');
+    console.log('✅ Workout started - isTrackingRef set to TRUE');
   };
 
   // Stop tracking
   const stopTracking = () => {
     setIsTracking(false);
-    console.log('Workout stopped');
+    isTrackingRef.current = false;
+    console.log('❌ Workout stopped - isTrackingRef set to FALSE');
   };
 
   // Reset
@@ -449,15 +457,25 @@ const RepifyApp = () => {
                 )}
 
                 {/* Debug Info */}
-                {debugInfo && (
-                  <div className="absolute bottom-4 left-4 right-4 bg-black/90 px-4 py-3 rounded-lg text-sm">
-                    <div className="text-yellow-300 font-mono">{debugInfo}</div>
-                    <div className="text-gray-400 text-xs mt-1">
-                      Pose: {poseDetected ? '✓ Detected' : '✗ Not detected'} | 
-                      MediaPipe: {mediapipeLoaded ? '✓ Loaded' : '✗ Loading'}
+                <div className="absolute bottom-4 left-4 right-4 bg-black/90 px-4 py-3 rounded-lg text-sm">
+                  {debugInfo ? (
+                    <>
+                      <div className="text-yellow-300 font-mono">{debugInfo}</div>
+                      <div className="text-gray-400 text-xs mt-1">
+                        Pose: {poseDetected ? '✓ Detected' : '✗ Not detected'} | 
+                        MediaPipe: {mediapipeLoaded ? '✓ Loaded' : '✗ Loading'} |
+                        Tracking: {isTracking ? '✓ Active' : '✗ Stopped'}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-gray-400 text-xs">
+                      Status: Pose: {poseDetected ? '✓' : '✗'} | 
+                      MediaPipe: {mediapipeLoaded ? '✓' : '✗'} | 
+                      Tracking: {isTracking ? '✓' : '✗'} |
+                      Camera: {cameraReady ? '✓' : '✗'}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {/* Instructions */}
