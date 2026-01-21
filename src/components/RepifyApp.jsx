@@ -215,31 +215,35 @@ const RepifyApp = () => {
     ctx.restore();
 
     // Draw landmarks and connections
-    if (results.poseLandmarks) {
+    if (results.poseLandmarks && results.poseLandmarks.length > 0) {
       setPoseDetected(true);
-      console.log('✓ Pose detected! Landmarks:', results.poseLandmarks.length);
       
       // Draw connections
-      window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, {
-        color: '#00FF00',
-        lineWidth: 4
-      });
+      if (window.drawConnectors) {
+        window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, {
+          color: '#00FF00',
+          lineWidth: 4
+        });
+      }
       
       // Draw landmarks
-      window.drawLandmarks(ctx, results.poseLandmarks, {
-        color: '#FF0000',
-        lineWidth: 2,
-        radius: 6
-      });
+      if (window.drawLandmarks) {
+        window.drawLandmarks(ctx, results.poseLandmarks, {
+          color: '#FF0000',
+          lineWidth: 2,
+          radius: 6
+        });
+      }
 
       // Detect reps if tracking
       if (isTracking) {
+        console.log('Calling detectRep with', results.poseLandmarks.length, 'landmarks');
         detectRep(results.poseLandmarks);
       }
     } else {
       setPoseDetected(false);
       if (isTracking) {
-        setDebugInfo('⚠️ No pose detected! Step back and face camera');
+        setDebugInfo('⚠️ No pose detected! Step back and ensure full body visible');
       }
     }
   };
